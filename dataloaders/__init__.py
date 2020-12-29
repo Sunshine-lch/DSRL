@@ -1,6 +1,6 @@
-from dataloaders.datasets import cityscapes, coco, combine_dbs, pascal, sbd
+from dataloaders.datasets import cityscapes, coco, combine_dbs, pascal, sbd, sar_seg_data
 from torch.utils.data import DataLoader
-
+import torch
 def make_data_loader(args, **kwargs):
 
     if args.dataset == 'pascal':
@@ -13,6 +13,15 @@ def make_data_loader(args, **kwargs):
         num_class = train_set.NUM_CLASSES
         train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, **kwargs)
         val_loader = DataLoader(val_set, batch_size=args.batch_size, shuffle=False, **kwargs)
+        test_loader = None
+
+        return train_loader, val_loader, test_loader, num_class
+    elif args.dataset == 'sar':
+        data_set = sar_seg_data.SARData(args)
+        train_set, val_set = torch.utils.data.random_split(data_set, [int(len(data_set.img_list)*args.train_number), int(len(data_set.img_list)*args.val_number)])
+        num_class = data_set.NUM_CLASSES
+        train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, **kwargs)
+        val_loader = DataLoader(val_set, batch_size=args.test_batch_size, shuffle=False, **kwargs)
         test_loader = None
 
         return train_loader, val_loader, test_loader, num_class

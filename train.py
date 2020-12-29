@@ -1,6 +1,7 @@
 import argparse
 import os
 import numpy as np
+import matplotlib.pyplot as plt
 from tqdm import tqdm
 import torch
 
@@ -103,6 +104,13 @@ class Trainer(object):
         for i, sample in enumerate(tbar):
             image, target = sample['image'], sample['label']
             input_img=torch.nn.functional.interpolate(image,size=[i//2 for i in image.size()[2:]], mode='bilinear', align_corners=True)
+            # plt.figure()
+            # plt.subplot(121)
+            # plt.imshow(image[0,0,:,:])
+            # plt.subplot(122)
+            # plt.imshow(input_img[0,0,:,:])
+            # plt.show(block=False)
+            # plt.close()
             if self.args.cuda:
                 input_img, image, target = input_img.cuda(), image.cuda(), target.cuda()
             self.scheduler(self.optimizer, i, epoch, self.best_pred)
@@ -192,12 +200,12 @@ def main():
                         help='backbone name (default: resnet)')
     parser.add_argument('--out-stride', type=int, default=16,
                         help='network output stride (default: 8)')
-    parser.add_argument('--dataset', type=str, default='cityscapes',
-                        choices=['pascal', 'coco', 'cityscapes'],
+    parser.add_argument('--dataset', type=str, default='sar',
+                        choices=['sar','pascal', 'coco', 'cityscapes'],
                         help='dataset name (default: pascal)')
-    parser.add_argument('--use-sbd', action='store_true', default=True,
+    parser.add_argument('--use-sbd', action='store_true', default=False,
                         help='whether to use SBD dataset (default: True)')
-    parser.add_argument('--workers', type=int, default=4,
+    parser.add_argument('--workers', type=int, default=1,
                         metavar='N', help='dataloader threads')
     parser.add_argument('--base-size', type=int, default=1024,
                         help='base image size')
@@ -256,8 +264,18 @@ def main():
                         help='evaluuation interval (default: 1)')
     parser.add_argument('--no-val', action='store_true', default=False,
                         help='skip validation during training')
+    parser.add_argument('--polar', type=str, default='HH',
+                        help='skip validation during training')
+    
 
     args = parser.parse_args()
+#------------------manually defined parameters---------------------------------------
+    args.polar = 'HH'
+    args.train_number = 0.8
+    args.val_number = 0.2
+    args.batch_size = 2
+    args.data_number = 500
+#------------------manually defined parameters---------------------------------------
     args.cuda = not args.no_cuda and torch.cuda.is_available()
     if args.cuda:
         try:
@@ -274,6 +292,7 @@ def main():
     # default settings for epochs, batch_size and lr
     if args.epochs is None:
         epoches = {
+            'sar':100,
             'coco': 30,
             'cityscapes': 1000,
             'pascal': 50,
@@ -291,6 +310,7 @@ def main():
             'coco': 0.1,
             'cityscapes': 0.005,
             'pascal': 0.007,
+            'sar':0.007
         }
         args.lr = lrs[args.dataset.lower()] / (4 * len(args.gpu_ids)) * args.batch_size
 

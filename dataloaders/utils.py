@@ -3,11 +3,13 @@ import numpy as np
 import torch
 
 def decode_seg_map_sequence(label_masks, dataset='pascal'):
-    rgb_masks = []
-    for label_mask in label_masks:
-        rgb_mask = decode_segmap(label_mask, dataset)
-        rgb_masks.append(rgb_mask)
-    rgb_masks = torch.from_numpy(np.array(rgb_masks).transpose([0, 3, 1, 2]))
+    # rgb_masks = []
+    # for label_mask in label_masks:
+    #     rgb_mask = decode_segmap(label_mask, dataset)
+    #     # rgb_mask = decode_sar_seg_map_sequence(label_mask)
+    #     rgb_masks.append(rgb_mask)
+    # rgb_masks = torch.from_numpy(np.array(rgb_masks).transpose([0, 3, 1, 2]))
+    rgb_masks = decode_sar_seg_map_sequence(label_masks)
     return rgb_masks
 
 
@@ -47,6 +49,33 @@ def decode_segmap(label_mask, dataset, plot=False):
     else:
         return rgb
 
+def decode_sar_seg_map_sequence(label_masks):
+    numclass = 7
+    rgb_masks = []
+    label_colours = np.array([
+     [0, 0, 0],
+     [0, 255, 255],
+     [255, 0, 0],
+     [0, 0, 255],
+     [0, 255, 0],
+     [255, 255, 0],
+     [255, 255, 255]])
+    for label_mask in label_masks:
+        r = label_mask.copy()
+        g = label_mask.copy()
+        b = label_mask.copy()
+        for ll in range(0, numclass):
+            r[label_mask == ll] = label_colours[ll, 0]
+            g[label_mask == ll] = label_colours[ll, 1]
+            b[label_mask == ll] = label_colours[ll, 2]
+        rgb = np.zeros((label_mask.shape[0], label_mask.shape[1], 3))
+        rgb[:, :, 0] = r
+        rgb[:, :, 1] = g
+        rgb[:, :, 2] = b
+        rgb_mask = rgb
+        rgb_masks.append(rgb_mask)
+    rgb_masks = torch.from_numpy(np.array(rgb_masks).transpose([0, 3, 1, 2]))
+    return rgb_masks
 
 def encode_segmap(mask):
     """Encode segmentation label images as pascal classes
