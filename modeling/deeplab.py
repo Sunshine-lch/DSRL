@@ -6,6 +6,7 @@ from modeling.aspp import build_aspp
 from modeling.decoder import build_decoder
 from modeling.backbone import build_backbone
 from modeling.sr_decoder import build_sr_decoder
+from modeling.sr_discriminator import build_sr_discriminator
 
 class EDSRConv(torch.nn.Module):
     def __init__(self, in_ch, out_ch):
@@ -42,6 +43,11 @@ class DeepLab(nn.Module):
         self.aspp = build_aspp(backbone, output_stride, BatchNorm)
         self.decoder = build_decoder(num_classes, backbone, BatchNorm)
         self.sr_decoder = build_sr_decoder(num_classes,backbone,BatchNorm)
+        #---增加discriminator
+        num_channel = 3
+        ndf = 32
+        self.sr_discriminator = build_sr_discriminator(num_channel,ndf) # 核查feature_map的大小
+        #---
         self.pointwise = torch.nn.Sequential(
             torch.nn.Conv2d(num_classes,3,1),
             torch.nn.BatchNorm2d(3),  #添加了BN层
@@ -76,8 +82,13 @@ class DeepLab(nn.Module):
         x_sr_up = self.up_sr_3(x_sr_up)
         x_sr_up=self.up_edsr_3(x_sr_up)
         x_sr_up=self.up_conv_last(x_sr_up)
-
-        return x_seg_up,x_sr_up,self.pointwise(x_seg_up),x_sr_up
+        # return x_seg_up,x_sr_up,self.pointwise(x_seg_up),x_sr_up
+        seg_discriminate = self.sr_discriminator(self.pointwise(x_seg_up))
+        sr_discriminate = self.sr_discriminator(x_sr_up)
+        return x_seg_up,x_sr_up,seg_discriminate,sr_discriminate
+        # 采用discriminator 来让 self.pointwise(x_seg_up) 和 x_sr_up 足够相似
+        # 分别将self.pointwise(x_seg_up)，x_sr_up输入进discriminator中，然后输入进D网络的loss
+        # 
 
     def freeze_bn(self):
         for m in self.modules():
@@ -121,7 +132,7 @@ class DeepLab(nn.Module):
 if __name__ == "__main__":
     model = DeepLab(backbone='mobilenet', output_stride=16)
     model.eval()
-    input = torch.rand(1, 3, 513, 513)
+    input = torch.rand(1, 3, 512, 512)
     output = model(input)
     print(output.size())
 
