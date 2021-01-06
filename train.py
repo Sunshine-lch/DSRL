@@ -1,7 +1,6 @@
 import argparse
 import os
 import numpy as np
-import matplotlib.pyplot as plt
 from tqdm import tqdm
 import torch
 
@@ -16,13 +15,10 @@ from utils.lr_scheduler import LR_Scheduler
 from utils.saver import Saver
 from utils.summaries import TensorboardSummary
 from utils.metrics import Evaluator
-from utils.discriminator_loss import DLoss
-import time
 
-w_sr=0.5
-w_fa=0.001
-os.environ['CUDA_VISIBLE_DEVICES'] = '3'
-txtpath = os.path.join('./resultsave', time.strftime('%Y-%m-%d-%H',time.localtime(time.time())) + 'log.txt' )
+w_sr=0.01
+w_fa=0.01
+os.environ['CUDA_VISIBLE_DEVICES'] = '2'
 class Trainer(object):
     def __init__(self, args):
         self.args = args
@@ -38,7 +34,7 @@ class Trainer(object):
         kwargs = {'num_workers': args.workers, 'pin_memory': True}
         self.train_loader, self.val_loader, self.test_loader, self.nclass = make_data_loader(args, **kwargs)
 
-        # Define network7
+        # Define network
         model = DeepLab(num_classes=self.nclass,
                         backbone=args.backbone,
                         output_stride=args.out_stride,
@@ -46,9 +42,7 @@ class Trainer(object):
                         freeze_bn=args.freeze_bn)
 
         train_params = [{'params': model.get_1x_lr_params(), 'lr': args.lr},
-                        {'params': model.get_10x_lr_params(), 'lr': args.lr * 10},
-                        {'params': model.sr_discriminator.parameters(), 'lr': args.lr*0.01}
-                        ]
+                        {'params': model.get_10x_lr_params(), 'lr': args.lr * 10}]
 
         # Define Optimizer
         optimizer = torch.optim.SGD(train_params, momentum=args.momentum,
@@ -105,51 +99,35 @@ class Trainer(object):
         train_loss = 0.0
         self.model.train()
         tbar = tqdm(self.train_loader)
+        
         num_img_tr = len(self.train_loader)
         for i, sample in enumerate(tbar):
             image, target = sample['image'], sample['label']
-            input_img=torch.nn.functional.interpolate(image,size=[i//2 for i in image.size()[2:]], mode='bilinear', align_corners=True)
-            # plt.figure()
-            # plt.subplot(121)
-            # plt.imshow(image[0,0,:,:])
-            # plt.subplot(122)
-            # plt.imshow(input_img[0,0,:,:])
-            # plt.show(block=False)
-            # plt.close()
+            input_img=torch.nn.functional.interpolate(image,size=[i//2 for i in image.size()[2:]], mode='bilinear', align_corners=True) 
+            # input_img=image[:,:,::2,::2]        
             if self.args.cuda:
                 input_img, image, target = input_img.cuda(), image.cuda(), target.cuda()
             self.scheduler(self.optimizer, i, epoch, self.best_pred)
             self.optimizer.zero_grad()
-            output,output_sr,real_output,G_output = self.model(input_img)
+            output,output_sr,fea_seg,fea_sr = self.model(input_img)
             # del fea_seg
             # del fea_sr
             # 加入FALoss
-            # loss = self.criterion(output, target)+w_sr*torch.nn.MSELoss()(output_sr,image)+w_fa*FALoss()(real_output,G_output)
-            D_loss = DLoss(real_output.shape[0])(real_output,G_output)
-            # D_loss = DLoss(real_output.view(-1))(real_output,G_output)
-            loss = self.criterion(output, target)+w_sr*torch.nn.MSELoss()(output_sr,image)+w_fa*D_loss
+            loss = self.criterion(output, target)+self.args.wsr*torch.nn.MSELoss()(output_sr,image)+self.args.wfa*FALoss()(fea_seg,fea_sr)
             loss.backward()
-            # D_loss.backward()
-            # D_loss.backward()
             self.optimizer.step()
-            # D_loss = errD_real.item() + errD_fake.item()
-            train_loss += loss.item() 
+            train_loss += loss.item()
             tbar.set_description('Train loss: %.3f' % (train_loss / (i + 1)))
             self.writer.add_scalar('train/total_loss_iter', loss.item(), i + num_img_tr * epoch)
 
             # Show 10 * 3 inference results each epoch
-            if i % (num_img_tr // 2) == 0:
+            if i % (num_img_tr // 10) == 0:
                 global_step = i + num_img_tr * epoch
                 self.summary.visualize_image(self.writer, self.args.dataset, image, target, output, global_step)
 
         self.writer.add_scalar('train/total_loss_epoch', train_loss, epoch)
         print('[Epoch: %d, numImages: %5d]' % (epoch, i * self.args.batch_size + image.data.shape[0]))
         print('Loss: %.3f' % train_loss)
-        file_handle = open(txtpath, mode='a')
-        file_handle.write('[Epoch: %d, numImages: %5d]' % (epoch, i * self.args.batch_size + image.data.shape[0]))
-        file_handle.write('Loss: %.3f' % train_loss)
-        file_handle.write('\n')
-        file_handle.close
 
         if self.args.no_val:
             # save checkpoint every epoch
@@ -170,6 +148,7 @@ class Trainer(object):
         for i, sample in enumerate(tbar):
             image, target = sample['image'], sample['label']
             input_img=torch.nn.functional.interpolate(image,size=[i//2 for i in image.size()[2:]], mode='bilinear', align_corners=True)
+            # input_img=image[:,:,::2,::2]
             if self.args.cuda:
                 input_img, image, target = input_img.cuda(), image.cuda(), target.cuda()
             with torch.no_grad():
@@ -197,14 +176,6 @@ class Trainer(object):
         print('[Epoch: %d, numImages: %5d]' % (epoch, i * self.args.batch_size + image.data.shape[0]))
         print("Acc:{}, Acc_class:{}, mIoU:{}, fwIoU: {}".format(Acc, Acc_class, mIoU, FWIoU))
         print('Loss: %.3f' % test_loss)
-
-        file_handle = open(txtpath, mode='a')
-        file_handle.write('Validation:')
-        file_handle.write('[Epoch: %d, numImages: %5d]' % (epoch, i * self.args.batch_size + image.data.shape[0]))
-        file_handle.write("Acc:{}, Acc_class:{}, mIoU:{}, fwIoU: {}".format(Acc, Acc_class, mIoU, FWIoU))
-        file_handle.write('Loss: %.3f' % test_loss)
-        file_handle.write('\n')
-        file_handle.close
 
         new_pred = mIoU
         if new_pred > self.best_pred:
@@ -239,7 +210,7 @@ def main():
                         help='whether to use sync bn (default: auto)')
     parser.add_argument('--freeze-bn', type=bool, default=False,
                         help='whether to freeze bn parameters (default: False)')
-    parser.add_argument('--loss-type', type=str, default='focal',
+    parser.add_argument('--loss-type', type=str, default='ce',
                         choices=['ce', 'focal'],
                         help='loss func type (default: ce)')
     # training hyper params
@@ -258,7 +229,7 @@ def main():
     # optimizer params
     parser.add_argument('--lr', type=float, default=None, metavar='LR',
                         help='learning rate (default: auto)')
-    parser.add_argument('--lr-scheduler', type=str, default='cos',
+    parser.add_argument('--lr-scheduler', type=str, default='poly',
                         choices=['poly', 'step', 'cos'],
                         help='lr scheduler mode: (default: poly)')
     parser.add_argument('--momentum', type=float, default=0.9,
@@ -294,11 +265,14 @@ def main():
 
     args = parser.parse_args()
 #------------------manually defined parameters---------------------------------------
-    args.polar = 'HH'
+    args.polar = 'VV'
     args.train_number = 0.8
     args.val_number = 0.2
     args.batch_size = 4
     args.data_number = 500
+    args.use_balanced_weights = True
+    args.wfa = 0.15
+    args.wsr = 0.15
 #------------------manually defined parameters---------------------------------------
     args.cuda = not args.no_cuda and torch.cuda.is_available()
     if args.cuda:
@@ -316,7 +290,7 @@ def main():
     # default settings for epochs, batch_size and lr
     if args.epochs is None:
         epoches = {
-            'sar':1000,
+            'sar':300,
             'coco': 30,
             'cityscapes': 1000,
             'pascal': 50,
@@ -324,7 +298,7 @@ def main():
         args.epochs = epoches[args.dataset.lower()]
 
     if args.batch_size is None:
-        args.batch_size = 40 * len(args.gpu_ids)
+        args.batch_size = 4 * len(args.gpu_ids)
 
     if args.test_batch_size is None:
         args.test_batch_size = args.batch_size
@@ -337,7 +311,7 @@ def main():
             'sar':0.01
         }
         args.lr = lrs[args.dataset.lower()] / (4 * len(args.gpu_ids)) * args.batch_size
-    args.lr = 0.001
+
 
     if args.checkname is None:
         args.checkname = 'deeplab-'+str(args.backbone)
@@ -346,9 +320,6 @@ def main():
     trainer = Trainer(args)
     print('Starting Epoch:', trainer.args.start_epoch)
     print('Total Epoches:', trainer.args.epochs)
-    file_handle = open(txtpath,mode='w')
-    file_handle.close()
-
     for epoch in range(trainer.args.start_epoch, trainer.args.epochs):
         trainer.training(epoch)
         if not trainer.args.no_val and epoch % args.eval_interval == (args.eval_interval - 1):

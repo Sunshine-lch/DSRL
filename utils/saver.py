@@ -54,6 +54,11 @@ class Saver(object):
         p['epoch'] = self.args.epochs
         p['base_size'] = self.args.base_size
         p['crop_size'] = self.args.crop_size
+        p['polar'] = self.args.polar 
+        if self.args.use_balanced_weights:
+            p['use_weights'] = 'Ture'
+        else:
+            p['use_weights'] = 'False'
 
         for key, val in p.items():
             log_file.write(key + ':' + str(val) + '\n')
