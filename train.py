@@ -297,7 +297,7 @@ def main():
     args.polar = 'HH'
     args.train_number = 0.8
     args.val_number = 0.2
-    args.batch_size = 40
+    args.batch_size = 4
     args.data_number = 500
 #------------------manually defined parameters---------------------------------------
     args.cuda = not args.no_cuda and torch.cuda.is_available()
@@ -334,7 +334,7 @@ def main():
             'coco': 0.1,
             'cityscapes': 0.005,
             'pascal': 0.007,
-            'sar':0.1
+            'sar':0.01
         }
         args.lr = lrs[args.dataset.lower()] / (4 * len(args.gpu_ids)) * args.batch_size
     args.lr = 0.001
